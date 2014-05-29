@@ -1,9 +1,7 @@
 require 'rubygems'
 require 'rake'
 require 'rake/testtask'
-require 'rake/rdoctask'
-require 'rake/packagetask'
-require 'rake/gempackagetask'
+require 'bundler/gem_tasks'
 
 require File.dirname(__FILE__) + '/lib/aws/s3'
 
@@ -19,16 +17,6 @@ Rake::TestTask.new do |test|
 end
 
 namespace :doc do
-  Rake::RDocTask.new do |rdoc|  
-    rdoc.rdoc_dir = 'doc'  
-    rdoc.title    = "AWS::S3 -- Support for Amazon S3's REST api"  
-    rdoc.options << '--line-numbers' << '--inline-source'
-    rdoc.rdoc_files.include('README')
-    rdoc.rdoc_files.include('COPYING')
-    rdoc.rdoc_files.include('INSTALL')    
-    rdoc.rdoc_files.include('lib/**/*.rb')
-  end
-  
   task :rdoc => 'doc:readme'
   
   task :refresh => :rerdoc do
@@ -56,101 +44,68 @@ namespace :doc do
   end
 end
 
-namespace :dist do  
-  spec = Gem::Specification.new do |s|
-    s.name              = 'aws-s3'
-    s.version           = Gem::Version.new(AWS::S3::Version)
-    s.summary           = "Client library for Amazon's Simple Storage Service's REST API"
-    s.description       = s.summary
-    s.email             = 'marcel@vernix.org'
-    s.author            = 'Marcel Molina Jr.'
-    s.has_rdoc          = true
-    s.extra_rdoc_files  = %w(README COPYING INSTALL)
-    s.homepage          = 'http://amazon.rubyforge.org'
-    s.rubyforge_project = 'amazon'
-    s.files             = FileList['Rakefile', 'lib/**/*.rb', 'bin/*', 'support/**/*.rb']
-    s.executables       << 's3sh'
-    s.test_files        = Dir['test/**/*']
-    
-    s.add_dependency 'xml-simple'
-    s.add_dependency 'builder'
-    s.add_dependency 'mime-types'
-    s.rdoc_options  = ['--title', "AWS::S3 -- Support for Amazon S3's REST api",
-                       '--main',  'README',
-                       '--line-numbers', '--inline-source']
-    s.license = "MIT"
-  end
-    
-  # Regenerate README before packaging
-  task :package => 'doc:readme'
-  Rake::GemPackageTask.new(spec) do |pkg|
-    pkg.need_tar_gz = true
-    pkg.package_files.include('{lib,script,test,support}/**/*')
-    pkg.package_files.include('README')
-    pkg.package_files.include('COPYING')
-    pkg.package_files.include('INSTALL')
-    pkg.package_files.include('Rakefile')
-  end
-  
+
+namespace :dist do
+
   desc 'Install with gems'
   task :install => :repackage do
     sh "sudo gem i pkg/#{spec.name}-#{spec.version}.gem"
   end
-  
+
   desc 'Uninstall gem'
   task :uninstall do
     sh "sudo gem uninstall #{spec.name} -x"
   end
-  
+
   desc 'Reinstall gem'
   task :reinstall => [:uninstall, :install]
-  
+
   task :confirm_release do
     print "Releasing version #{spec.version}. Are you sure you want to proceed? [Yn] "
     abort if STDIN.getc == ?n
   end
-  
+
   desc 'Tag release'
   task :tag do
     sh %(git tag -a '#{spec.version}-release' -m 'Tagging #{spec.version} release')
     sh 'git push --tags'
   end
-  
+
   desc 'Update changelog to include a release marker'
   task :add_release_marker_to_changelog do
     changelog = IO.read('CHANGELOG')
     changelog.sub!(/^head:/, "#{spec.version}:")
-    
+
     open('CHANGELOG', 'w') do |file|
       file.write "head:\n\n#{changelog}"
     end
   end
-  
+
   task :commit_changelog do
     sh %(git commit CHANGELOG -m "Bump changelog version marker for release")
     sh 'git push'
   end
-  
+
   package_name = lambda {|specification| File.join('pkg', "#{specification.name}-#{specification.version}")}
-  
+
   desc 'Push a release to rubyforge'
-  task :release => [:confirm_release, :clean, :add_release_marker_to_changelog, :package, :commit_changelog, :tag] do 
+  task :release => [:confirm_release, :clean, :add_release_marker_to_changelog, :package, :commit_changelog, :tag] do
     require 'rubyforge'
     package = package_name[spec]
 
     rubyforge = RubyForge.new.configure
     rubyforge.login
-    
+
     user_config = rubyforge.userconfig
     user_config['release_changes'] = YAML.load_file('CHANGELOG')[spec.version.to_s].join("\n")
-  
+
     version_already_released = lambda do
       releases = rubyforge.autoconfig['release_ids']
       releases.has_key?(spec.name) && releases[spec.name][spec.version.to_s]
     end
-    
+
     abort("Release #{spec.version} already exists!") if version_already_released.call
-    
+
     begin
       rubyforge.add_release(spec.rubyforge_project, spec.name, spec.version.to_s, "#{package}.tar.gz", "#{package}.gem")
       puts "Version #{spec.version} released!"
@@ -159,18 +114,17 @@ namespace :dist do
       raise
     end
   end
-  
+
   desc 'Upload a beta gem'
   task :push_beta_gem => [:clobber_package, :package] do
     beta_gem = package_name[spec]
     sh %(scp #{beta_gem}.gem  marcel@rubyforge.org:/var/www/gforge-projects/amazon/beta)
   end
-  
+
   task :spec do
     puts spec.to_ruby
   end
 end
-
 desc 'Check code to test ratio'
 task :stats do 
   library_files = FileList["#{library_root}/lib/**/*.rb"]
@@ -293,9 +247,7 @@ end if File.exists?(File.join(library_root, 'TODO'))
 
 namespace :site do
   require 'erb'
-  require 'rdoc/markup/simple_markup'
-  require 'rdoc/markup/simple_markup/to_html'
-  
+
   readme    = lambda { IO.read('README')[/^== Getting started\n(.*)/m, 1] }
 
   readme_to_html = lambda do
